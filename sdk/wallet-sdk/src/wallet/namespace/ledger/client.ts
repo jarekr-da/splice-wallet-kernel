@@ -3,7 +3,13 @@
 
 import { CommonCtx } from '../../sdk.js'
 import { v4 } from 'uuid'
-import { PrepareOptions, ExecuteOptions, AcsRequestOptions } from './types.js'
+import {
+    PrepareOptions,
+    ExecuteOptions,
+    AcsRequestOptions,
+    UnassignOptions,
+    AssignOptions,
+} from './types.js'
 import { type PrepareSubmissionResponse } from '@canton-network/core-ledger-client'
 import { PreparedTransaction } from '../transactions/prepared.js'
 import { SignedTransaction } from '../transactions/signed.js'
@@ -256,6 +262,104 @@ export class Ledger {
             this.sdkContext,
             signPromise,
             (signed, opts) => this.execute(signed, opts)
+        )
+    }
+
+    /**
+     * Unassign a contract from one synchronizer to another (first step of reassignment).
+     * Submits an unassign command and waits for the reassignment result.
+     * @returns The reassignment result containing the unassigned event with the reassignmentId needed for the assign step.
+     */
+    async unassign(options: UnassignOptions) {
+        const {
+            submitter,
+            contractId,
+            source,
+            target,
+            commandId = v4(),
+            workflowId,
+            submissionId,
+        } = options
+
+        return this.sdkContext.ledgerProvider.request<Ops.PostV2CommandsSubmitAndWaitForReassignment>(
+            {
+                method: 'ledgerApi',
+                params: {
+                    resource: '/v2/commands/submit-and-wait-for-reassignment',
+                    requestMethod: 'post',
+                    body: {
+                        reassignmentCommands: {
+                            commandId,
+                            submitter,
+                            ...(workflowId && { workflowId }),
+                            ...(submissionId && { submissionId }),
+                            userId: this.sdkContext.userId,
+                            commands: [
+                                {
+                                    command: {
+                                        UnassignCommand: {
+                                            value: {
+                                                contractId,
+                                                source,
+                                                target,
+                                            },
+                                        },
+                                    },
+                                },
+                            ],
+                        },
+                    },
+                },
+            }
+        )
+    }
+
+    /**
+     * Assign a previously unassigned contract to the target synchronizer (second step of reassignment).
+     * Submits an assign command and waits for the reassignment result.
+     * @param options.reassignmentId The reassignment ID from the unassign step's UnassignedEvent.
+     */
+    async assign(options: AssignOptions) {
+        const {
+            submitter,
+            reassignmentId,
+            source,
+            target,
+            commandId = v4(),
+            workflowId,
+            submissionId,
+        } = options
+
+        return this.sdkContext.ledgerProvider.request<Ops.PostV2CommandsSubmitAndWaitForReassignment>(
+            {
+                method: 'ledgerApi',
+                params: {
+                    resource: '/v2/commands/submit-and-wait-for-reassignment',
+                    requestMethod: 'post',
+                    body: {
+                        reassignmentCommands: {
+                            commandId,
+                            submitter,
+                            ...(workflowId && { workflowId }),
+                            ...(submissionId && { submissionId }),
+                            userId: this.sdkContext.userId,
+                            commands: [
+                                {
+                                    command: {
+                                        AssignCommand: {
+                                            value: {
+                                                reassignmentId,
+                                                source,
+                                                target,
+                                            },
+                                        },
+                                    },
+                                },
+                            ],
+                        },
+                    },
+                },
+            }
         )
     }
 }

@@ -32,3 +32,23 @@ export type WrappedCommand<
 export type AcsRequestOptions = Omit<AcsOptions, 'offset'> & {
     offset?: number
 }
+
+export type UnassignOptions = {
+    submitter: PartyId
+    contractId: string
+    source: string
+    target: string
+    commandId?: string
+    workflowId?: string
+    submissionId?: string
+}
+
+export type AssignOptions = {
+    submitter: PartyId
+    reassignmentId: string
+    source: string
+    target: string
+    commandId?: string
+    workflowId?: string
+    submissionId?: string
+}

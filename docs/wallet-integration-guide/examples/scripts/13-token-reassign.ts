@@ -74,41 +74,49 @@ logger.info(`Private synchronizer: ${privateSyncId}`)
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 
-// trading-app DAR (for OTCTradeProposal / OTCTrade)
-const TRADING_APP_PACKAGE_ID =
-    'e5c9847d5a88d3b8d65436f01765fc5ba142cc58529692e2dacdd865d9939f71'
+// trading-app DAR (for OTCTradeProposal / OTCTrade) – vetted on global only
 const tradingDarPath = path.join(
     here,
     '../../../../.localnet/dars/splice-token-test-trading-app-1.0.0.dar'
 )
 const tradingDarBytes = await fs.readFile(tradingDarPath)
-await sdk.ledger.dar.upload(tradingDarBytes, TRADING_APP_PACKAGE_ID)
-logger.info('Uploaded trading-app DAR')
+await sdk.ledger.dar.upload(
+    tradingDarBytes,
+    'splice-token-test-trading-app',
+    globalSyncId
+)
+logger.info('Uploaded trading-app DAR (global)')
 
-// token-composition DAR (Token, TokenAllocation – vetted on both syncs)
-const TOKEN_COMPOSITION_PACKAGE_ID =
-    'b1c0a5d4419e25c3d8b75083223c0ea949edda8f8e3a5475d117577cc95caa89'
+// token-composition DAR (Token, TokenAllocation) – vetted on both syncs
 const tokenCompositionDarPath = path.join(
     here,
-    '../daml/token-composition/.daml/dist/token-composition-1.0.0.dar'
+    '../daml/token-composition/.daml/dist/token-composition-2.0.0.dar'
 )
 const tokenCompositionDarBytes = await fs.readFile(tokenCompositionDarPath)
 await sdk.ledger.dar.upload(
     tokenCompositionDarBytes,
-    TOKEN_COMPOSITION_PACKAGE_ID
+    'token-composition',
+    globalSyncId
 )
-logger.info('Uploaded token-composition DAR')
+await sdk.ledger.dar.upload(
+    tokenCompositionDarBytes,
+    'token-composition',
+    privateSyncId
+)
+logger.info('Uploaded token-composition DAR (global + private)')
 
-// token-private DAR (TokenRules – factory for private sync)
-const TOKEN_PRIVATE_PACKAGE_ID =
-    'f158f3eb283e109f4449662821c27f1821b2c61ba36c8670743262c8db7bb4d1'
+// token-private DAR (TokenRules factory) – vetted on private only
 const tokenPrivateDarPath = path.join(
     here,
-    '../daml/token-private/.daml/dist/token-private-1.0.0.dar'
+    '../daml/token-private/.daml/dist/token-private-2.0.0.dar'
 )
 const tokenPrivateDarBytes = await fs.readFile(tokenPrivateDarPath)
-await sdk.ledger.dar.upload(tokenPrivateDarBytes, TOKEN_PRIVATE_PACKAGE_ID)
-logger.info('Uploaded token-private DAR')
+await sdk.ledger.dar.upload(
+    tokenPrivateDarBytes,
+    'token-private',
+    privateSyncId
+)
+logger.info('Uploaded token-private DAR (private)')
 
 // ---------------------------------------------------------------------------
 // 4. Allocate parties: Alice, Bob, Venue (admin)
@@ -117,10 +125,25 @@ logger.info('Uploaded token-private DAR')
 const allocatedParties = await Promise.all(
     ['v1-13-alice', 'v1-13-bob', 'v1-13-venue'].map(async (partyHint) => {
         const partyKeys = sdk.keys.generate()
+
+        // Register the party on the global synchronizer first
         const party = await sdk.party.external
-            .create(partyKeys.publicKey, { partyHint })
+            .create(partyKeys.publicKey, {
+                partyHint,
+                synchronizerId: globalSyncId,
+            })
             .sign(partyKeys.privateKey)
             .execute()
+
+        // Also register the same party on the private synchronizer
+        // so it can transact on both syncs
+        await sdk.party.external
+            .create(partyKeys.publicKey, {
+                partyHint,
+                synchronizerId: privateSyncId,
+            })
+            .sign(partyKeys.privateKey)
+            .execute({ forceAllocate: true, grantUserRights: false })
 
         return [
             partyHint,
@@ -183,10 +206,17 @@ const tokenRulesContracts = await sdk.ledger.acs.read({
     parties: [venue.partyId],
     filterByParty: true,
 })
-const tokenRulesCid = getActiveContractCid(
-    tokenRulesContracts?.[0]?.contractEntry!
-)
-if (!tokenRulesCid) throw new Error('TokenRules contract not found')
+const tokenRulesEntry = tokenRulesContracts?.[0]?.contractEntry
+if (!tokenRulesEntry || !('JsActiveContract' in tokenRulesEntry))
+    throw new Error('TokenRules contract not found')
+const tokenRulesCid = tokenRulesEntry.JsActiveContract.createdEvent.contractId
+const tokenRulesDisclosed = {
+    templateId: tokenRulesContracts[0].templateId,
+    contractId: tokenRulesCid,
+    createdEventBlob:
+        tokenRulesEntry.JsActiveContract.createdEvent.createdEventBlob,
+    synchronizerId: tokenRulesContracts[0].synchronizerId,
+}
 
 const mintCmd = {
     ExerciseCommand: {
@@ -269,62 +299,27 @@ const createProposalCmd = {
             venue: venue.partyId,
             tradeCid: null,
             transferLegs,
-            approvers: [venue.partyId],
+            approvers: [alice.partyId],
         },
     },
 }
 
 await sdk.ledger
     .prepare({
-        partyId: venue.partyId,
-        commands: createProposalCmd,
-        disclosedContracts: [],
-        synchronizerId: globalSyncId,
-    })
-    .sign(venue.keyPair.privateKey)
-    .execute({ partyId: venue.partyId })
-
-logger.info('OTCTradeProposal created by Venue on global synchronizer')
-
-// ---------------------------------------------------------------------------
-// 9. Alice and Bob approve the trade proposal
-// ---------------------------------------------------------------------------
-
-// Alice approves
-const proposalsAlice = await sdk.ledger.acs.read({
-    templateIds: [
-        '#splice-token-test-trading-app:Splice.Testing.Apps.TradingApp:OTCTradeProposal',
-    ],
-    parties: [alice.partyId],
-    filterByParty: true,
-})
-
-const proposalCidAlice = getActiveContractCid(
-    proposalsAlice?.[0]?.contractEntry!
-)
-if (!proposalCidAlice) throw new Error('OTCTradeProposal not found for Alice')
-
-await sdk.ledger
-    .prepare({
         partyId: alice.partyId,
-        commands: {
-            ExerciseCommand: {
-                templateId:
-                    '#splice-token-test-trading-app:Splice.Testing.Apps.TradingApp:OTCTradeProposal',
-                contractId: proposalCidAlice,
-                choice: 'OTCTradeProposal_Accept',
-                choiceArgument: { approver: alice.partyId },
-            },
-        },
+        commands: createProposalCmd,
         disclosedContracts: [],
         synchronizerId: globalSyncId,
     })
     .sign(alice.keyPair.privateKey)
     .execute({ partyId: alice.partyId })
 
-logger.info('Alice approved OTCTradeProposal')
+logger.info('OTCTradeProposal created by Alice on global synchronizer')
 
-// Bob approves
+// ---------------------------------------------------------------------------
+// 9. Bob approves the trade proposal
+// ---------------------------------------------------------------------------
+
 const proposalsBob = await sdk.ledger.acs.read({
     templateIds: [
         '#splice-token-test-trading-app:Splice.Testing.Apps.TradingApp:OTCTradeProposal',
@@ -440,9 +435,10 @@ const bobTokenCid = getActiveContractCid(bobTokenContracts?.[0]?.contractEntry!)
 if (!bobTokenCid) throw new Error("Bob's Token holding not found")
 
 // Exercise AllocationFactory_Allocate on TokenRules on the private sync
+// Note: interface choices must use the interface ID as templateId
 const allocateBobCmd = {
     ExerciseCommand: {
-        templateId: `#token-private:Demo.TokenPrivate:TokenRules`,
+        templateId: `#splice-api-token-allocation-instruction-v1:Splice.Api.Token.AllocationInstructionV1:AllocationFactory`,
         contractId: tokenRulesCid,
         choice: 'AllocationFactory_Allocate',
         choiceArgument: {
@@ -466,7 +462,7 @@ await sdk.ledger
     .prepare({
         partyId: bob.partyId,
         commands: allocateBobCmd,
-        disclosedContracts: [],
+        disclosedContracts: [tokenRulesDisclosed],
         synchronizerId: privateSyncId,
     })
     .sign(bob.keyPair.privateKey)
@@ -549,7 +545,9 @@ if (!unassignedEvent || !('JsUnassignedEvent' in unassignedEvent)) {
     throw new Error('No unassigned event found in reassignment result')
 }
 
-const reassignmentId = unassignedEvent.JsUnassignedEvent.value.reassignmentId
+const reassignmentId =
+    unassignedEvent.JsUnassignedEvent.value?.reassignmentId ??
+    unassignedEvent.JsUnassignedEvent.reassignmentId
 logger.info(`Unassigned. reassignmentId: ${reassignmentId}`)
 
 // Step 2: Assign to global sync

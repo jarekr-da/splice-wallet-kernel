@@ -1,6 +1,6 @@
 sdk-version: 3.4.0-snapshot.20251013.0
 name: token-private
-version: 1.0.0
+version: 2.0.0
 source: daml
 dependencies:
     - daml-prim
@@ -11,6 +11,6 @@ data-dependencies:
     - ../../../../../.localnet/dars/splice-api-token-allocation-v1-current.dar
     - ../../../../../.localnet/dars/splice-api-token-allocation-instruction-v1-current.dar
     - ../../../../../.localnet/dars/splice-api-token-transfer-instruction-v1-current.dar
-    - ../token-composition/.daml/dist/token-composition-1.0.0.dar
+    - ../token-composition/.daml/dist/token-composition-2.0.0.dar
 build-options:
     - --target=2.1

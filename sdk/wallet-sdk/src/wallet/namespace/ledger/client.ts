@@ -288,6 +288,9 @@ export class Ledger {
                     resource: '/v2/commands/submit-and-wait-for-reassignment',
                     requestMethod: 'post',
                     body: {
+                        eventFormat: {
+                            filtersForAnyParty: {},
+                        },
                         reassignmentCommands: {
                             commandId,
                             submitter,

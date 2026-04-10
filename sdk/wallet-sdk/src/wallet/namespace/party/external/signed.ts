@@ -39,6 +39,7 @@ export class SignedPartyCreation {
         options?: Partial<{
             expectHeavyLoad?: boolean
             grantUserRights?: boolean
+            forceAllocate?: boolean
         }>
     ) {
         const { party, signature } = await this.signedPartyPromise
@@ -50,7 +51,10 @@ export class SignedPartyCreation {
                 type: 'SDKOperationUnsupported',
             })
 
-        if (await this.checkIfPartyExists(party.partyId)) {
+        if (
+            !options?.forceAllocate &&
+            (await this.checkIfPartyExists(party.partyId))
+        ) {
             this.ctx.logger.info('Party already created.')
             return party
         }

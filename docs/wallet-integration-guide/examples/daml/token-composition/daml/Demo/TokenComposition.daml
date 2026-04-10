@@ -28,7 +28,8 @@ template Token
     amount : Decimal
       -- ^ Amount held.
   where
-    signatory owner, admin
+    signatory admin
+    observer owner
 
     interface instance Holding for Token where
       view = HoldingView with
@@ -59,8 +60,8 @@ template TokenAllocation
     allocation : AllocationSpecification
       -- ^ The settlement leg specification this allocation is for.
   where
-    signatory owner, admin
-    observer allocation.settlement.executor
+    signatory admin
+    observer owner, allocation.settlement.executor
 
     interface instance Holding for TokenAllocation where
       view = HoldingView with

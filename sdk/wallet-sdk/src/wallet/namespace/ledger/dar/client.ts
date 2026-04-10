@@ -3,6 +3,7 @@
 
 import { CommonCtx } from '../../../sdk.js'
 import { Ops } from '@canton-network/core-provider-ledger'
+import { VetOptions, UnvetOptions, ListVettedOptions } from './types.js'
 
 export class Dar {
     constructor(private readonly sdkContext: CommonCtx) {}
@@ -53,5 +54,108 @@ export class Dar {
             Array.isArray(result.packageIds) &&
             result.packageIds.includes(packageId)
         )
+    }
+
+    /**
+     * Vet packages on a specific synchronizer.
+     * Use after uploading a DAR with `vetAllPackages: false` to selectively
+     * control which synchronizers can use the packages.
+     */
+    async vet(options: VetOptions) {
+        return this.sdkContext.ledgerProvider.request<Ops.PostV2PackageVetting>(
+            {
+                method: 'ledgerApi',
+                params: {
+                    resource: '/v2/package-vetting',
+                    requestMethod: 'post',
+                    body: {
+                        synchronizerId: options.synchronizerId,
+                        changes: [
+                            {
+                                operation: {
+                                    Vet: {
+                                        value: {
+                                            packages: options.packageIds.map(
+                                                (packageId) => ({ packageId })
+                                            ),
+                                            ...(options.validFrom && {
+                                                newValidFromInclusive:
+                                                    options.validFrom,
+                                            }),
+                                            ...(options.validUntil && {
+                                                newValidUntilExclusive:
+                                                    options.validUntil,
+                                            }),
+                                        },
+                                    },
+                                },
+                            },
+                        ],
+                        ...(options.forceFlags && {
+                            updateVettedPackagesForceFlags: options.forceFlags,
+                        }),
+                    },
+                },
+            }
+        )
+    }
+
+    /**
+     * Remove vetting for packages on a specific synchronizer.
+     */
+    async unvet(options: UnvetOptions) {
+        return this.sdkContext.ledgerProvider.request<Ops.PostV2PackageVetting>(
+            {
+                method: 'ledgerApi',
+                params: {
+                    resource: '/v2/package-vetting',
+                    requestMethod: 'post',
+                    body: {
+                        synchronizerId: options.synchronizerId,
+                        changes: [
+                            {
+                                operation: {
+                                    Unvet: {
+                                        value: {
+                                            packages: options.packageIds.map(
+                                                (packageId) => ({ packageId })
+                                            ),
+                                        },
+                                    },
+                                },
+                            },
+                        ],
+                    },
+                },
+            }
+        )
+    }
+
+    /**
+     * List vetted packages, optionally filtered by package IDs or name prefixes.
+     */
+    async listVetted(options?: ListVettedOptions) {
+        return this.sdkContext.ledgerProvider.request<Ops.GetV2PackageVetting>({
+            method: 'ledgerApi',
+            params: {
+                resource: '/v2/package-vetting',
+                requestMethod: 'get',
+                body: {
+                    ...(options?.packageIds || options?.packageNamePrefixes
+                        ? {
+                              packageMetadataFilter: {
+                                  ...(options.packageIds && {
+                                      packageIds: options.packageIds,
+                                  }),
+                                  ...(options.packageNamePrefixes && {
+                                      packageNamePrefixes:
+                                          options.packageNamePrefixes,
+                                  }),
+                              },
+                          }
+                        : {}),
+                },
+            },
+        })
     }
 }

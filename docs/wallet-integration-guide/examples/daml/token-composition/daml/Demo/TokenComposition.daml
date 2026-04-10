@@ -1,0 +1,116 @@
+-- Copyright (c) 2025 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+-- | Token and TokenAllocation templates for cross-synchronizer demo.
+--
+-- This package is vetted on BOTH the private (app) synchronizer and the global synchronizer.
+-- Token implements Holding. TokenAllocation implements both Holding and Allocation,
+-- enabling it to be reassigned across synchronizers while maintaining allocation semantics.
+module Demo.TokenComposition where
+
+import DA.TextMap qualified as TextMap
+
+import Splice.Api.Token.MetadataV1
+import Splice.Api.Token.HoldingV1
+import Splice.Api.Token.AllocationV1
+
+
+-- | A simple token holding.
+-- Represents ownership of a custom instrument on any synchronizer.
+template Token
+  with
+    owner : Party
+      -- ^ Owner of the token holding.
+    admin : Party
+      -- ^ The registry admin party that administers this instrument.
+    instrumentId : Text
+      -- ^ Identifier for the instrument (e.g., "PrivateToken").
+    amount : Decimal
+      -- ^ Amount held.
+  where
+    signatory owner, admin
+
+    interface instance Holding for Token where
+      view = HoldingView with
+        owner
+        instrumentId = InstrumentId with admin; id = instrumentId
+        amount
+        lock = None
+        meta = Metadata with values = TextMap.empty
+
+
+-- | A token holding that has been allocated to a settlement leg.
+-- Implements both Holding (so it can be queried as a holding) and
+-- Allocation (so it can participate in settlement workflows).
+--
+-- This contract is created on the private synchronizer when a sender
+-- allocates tokens to a trade. It can then be reassigned to the global
+-- synchronizer for settlement.
+template TokenAllocation
+  with
+    owner : Party
+      -- ^ Owner of the allocated tokens.
+    admin : Party
+      -- ^ The registry admin party.
+    instrumentId : Text
+      -- ^ Identifier for the instrument.
+    amount : Decimal
+      -- ^ Amount allocated.
+    allocation : AllocationSpecification
+      -- ^ The settlement leg specification this allocation is for.
+  where
+    signatory owner, admin
+    observer allocation.settlement.executor
+
+    interface instance Holding for TokenAllocation where
+      view = HoldingView with
+        owner
+        instrumentId = InstrumentId with admin; id = instrumentId
+        amount
+        lock = Some Lock with
+          holders = [allocation.settlement.executor]
+          expiresAt = Some allocation.settlement.settleBefore
+          expiresAfter = None
+          context = Some "Allocated for settlement"
+        meta = Metadata with values = TextMap.empty
+
+    interface instance Allocation for TokenAllocation where
+      view = AllocationView with
+        allocation
+        holdingCids = []
+        meta = emptyMetadata
+
+      allocation_executeTransferImpl self Allocation_ExecuteTransfer{..} = do
+        -- Archive this allocation (consuming choice) and create a new Token for the receiver
+        let receiver = allocation.transferLeg.receiver
+        receiverHoldingCid <- create Token with
+          owner = receiver
+          admin
+          instrumentId
+          amount
+        pure Allocation_ExecuteTransferResult with
+          senderHoldingCids = []
+          receiverHoldingCids = [toInterfaceContractId receiverHoldingCid]
+          meta = emptyMetadata
+
+      allocation_cancelImpl self Allocation_Cancel{..} = do
+        -- Release the tokens back to the sender
+        senderHoldingCid <- create Token with
+          owner
+          admin
+          instrumentId
+          amount
+        pure Allocation_CancelResult with
+          senderHoldingCids = [toInterfaceContractId senderHoldingCid]
+          meta = emptyMetadata
+
+      allocation_withdrawImpl self Allocation_Withdraw{..} = do
+        -- Release the tokens back to the sender
+        senderHoldingCid <- create Token with
+          owner
+          admin
+          instrumentId
+          amount
+        pure Allocation_WithdrawResult with
+          senderHoldingCids = [toInterfaceContractId senderHoldingCid]
+          meta = emptyMetadata

@@ -8,7 +8,6 @@
 
 import * as path from 'path'
 import { getRepoRoot, info, success, error } from './lib/utils.js'
-import { installDPM } from './install-dpm.js'
 import { runDamlBuild } from './lib/daml-codegen.js'
 
 const repoRoot = getRepoRoot()
@@ -31,9 +30,6 @@ const EXAMPLE_DARS = [
 ]
 
 async function main() {
-    console.log(info('\n=== Installing DPM ===\n'))
-    await installDPM()
-
     console.log(info('\n=== Building Example DARs ===\n'))
 
     for (const dar of EXAMPLE_DARS) {

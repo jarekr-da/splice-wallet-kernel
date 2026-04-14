@@ -23,6 +23,12 @@ jobs:
             - name: run codegen
               run: yarn generate:all
 
+            - name: Fetch Splice SDK
+              run: yarn script:fetch:splice
+
+            - name: Build example DARs
+              run: yarn script:build:example-dars
+
             - name: Build project
               run: yarn build:all
 
